@@ -219,7 +219,7 @@ class SingleDownloadTab(ctk.CTkFrame):
         ctk.CTkLabel(url_frame, text="URL:").pack(side="left", padx=(10, 5))
         self.url_entry = ctk.CTkEntry(url_frame, placeholder_text="Pega la URL aquí...")
         self.url_entry.pack(side="left", fill="x", expand=True, padx=5)
-        self.url_entry.bind("<Button-3>", lambda e: self.create_entry_context_menu(self.url_entry))
+        self._bind_entry_context_menu(self.url_entry)
         self.url_entry.bind("<Return>", self.start_analysis_thread)
         self.url_entry.bind("<KeyRelease>", self.update_download_button_state)
         self.url_entry.bind("<<Paste>>", lambda e: self.app.after(50, self.update_download_button_state))
@@ -404,7 +404,7 @@ class SingleDownloadTab(ctk.CTkFrame):
         self.manual_cookie_frame = ctk.CTkFrame(cookie_options_frame, fg_color="transparent")
         self.cookie_path_entry = ctk.CTkEntry(self.manual_cookie_frame, placeholder_text="Ruta al archivo cookies.txt...")
         self.cookie_path_entry.pack(fill="x")
-        self.cookie_path_entry.bind("<Button-3>", lambda e: self.create_entry_context_menu(self.cookie_path_entry))
+        self._bind_entry_context_menu(self.cookie_path_entry)
         self.cookie_path_entry.bind("<KeyRelease>", self._on_cookie_detail_change)
         self.select_cookie_file_button = ctk.CTkButton(self.manual_cookie_frame, text="Elegir Archivo...", command=lambda: self.select_cookie_file())
         self.select_cookie_file_button.pack(fill="x", pady=(5,0))
@@ -418,7 +418,7 @@ class SingleDownloadTab(ctk.CTkFrame):
 
         ctk.CTkLabel(self.browser_options_frame, text="Perfil (Opcional):").pack(padx=10, pady=(5,0), anchor="w")
         self.browser_profile_entry = ctk.CTkEntry(self.browser_options_frame, placeholder_text="Ej: Default, Profile 1")
-        self.browser_profile_entry.bind("<Button-3>", lambda e: self.create_entry_context_menu(self.browser_profile_entry))
+        self._bind_entry_context_menu(self.browser_profile_entry)
         self.browser_profile_entry.pack(fill="x", padx=10)
         self.browser_profile_entry.bind("<KeyRelease>", self._on_cookie_detail_change)
         cookie_advice_label = ctk.CTkLabel(self.browser_options_frame, text=" ⓘ Si falla, cierre el navegador por completo. \n ⓘ Para Chrome/Edge/Brave,\n se recomienda usar la opción 'Archivo Manual'", font=ctk.CTkFont(size=11), text_color="orange", justify="left")
@@ -450,7 +450,7 @@ class SingleDownloadTab(ctk.CTkFrame):
         ctk.CTkLabel(details_frame, text="Título:", anchor="w").pack(fill="x", padx=5, pady=(5,0))
         self.title_entry = ctk.CTkEntry(details_frame, font=("", 14))
         self.title_entry.pack(fill="x", padx=5, pady=(0,10))
-        self.title_entry.bind("<Button-3>", lambda e: self.create_entry_context_menu(self.title_entry))
+        self._bind_entry_context_menu(self.title_entry)
 
         options_frame = ctk.CTkFrame(details_frame)
         options_frame.pack(fill="x", padx=5, pady=5)
@@ -828,7 +828,7 @@ class SingleDownloadTab(ctk.CTkFrame):
         
         self.output_path_entry = ctk.CTkEntry(download_frame, placeholder_text="Selecciona una carpeta...")
         self.output_path_entry.bind("<KeyRelease>", self.update_download_button_state)
-        self.output_path_entry.bind("<Button-3>", lambda e: self.create_entry_context_menu(self.output_path_entry))
+        self._bind_entry_context_menu(self.output_path_entry)
         self.output_path_entry.pack(side="left", fill="x", expand=True, padx=5)
         
         self.select_folder_button = ctk.CTkButton(download_frame, text="...", width=40, command=lambda: self.select_output_folder())
@@ -847,7 +847,7 @@ class SingleDownloadTab(ctk.CTkFrame):
         Tooltip(speed_label, tooltip_text, delay_ms=1000)
         Tooltip(self.speed_limit_entry, tooltip_text, delay_ms=1000)
         
-        self.speed_limit_entry.bind("<Button-3>", lambda e: self.create_entry_context_menu(self.speed_limit_entry))
+        self._bind_entry_context_menu(self.speed_limit_entry)
         self.speed_limit_entry.pack(side="left", padx=(0, 10))
 
         self.download_button = ctk.CTkButton(
@@ -883,7 +883,16 @@ class SingleDownloadTab(ctk.CTkFrame):
         self.recode_main_frame.pack(pady=(10, 0), padx=5, fill="both", expand=True)
         print("DEBUG: Panel de recodificación inicializado y visible")
 
-    def create_entry_context_menu(self, widget):
+    def _bind_entry_context_menu(self, widget):
+        """Asocia el menú contextual de edición para Windows/Linux/macOS."""
+        widget.bind("<Button-3>", lambda event: self.create_entry_context_menu(widget, event))
+
+        if platform.system() == "Darwin":
+            # Fallbacks comunes en macOS (trackpad y Ctrl+Click).
+            widget.bind("<Button-2>", lambda event: self.create_entry_context_menu(widget, event))
+            widget.bind("<Control-Button-1>", lambda event: self.create_entry_context_menu(widget, event))
+
+    def create_entry_context_menu(self, widget, event=None):
         """Crea y muestra un menú contextual para un widget de entrada de texto."""
         menu = tkinter.Menu(self, tearoff=0)
         
@@ -932,7 +941,10 @@ class SingleDownloadTab(ctk.CTkFrame):
         menu.add_command(label="Pegar", command=paste_text)
         menu.add_separator()
         menu.add_command(label="Seleccionar todo", command=lambda: widget.select_range(0, 'end'))
-        menu.tk_popup(widget.winfo_pointerx(), widget.winfo_pointery())
+
+        x = event.x_root if event else widget.winfo_pointerx()
+        y = event.y_root if event else widget.winfo_pointery()
+        menu.tk_popup(x, y)
         
     def paste_into_widget(self, widget):
         """Obtiene el contenido del portapapeles y lo inserta en un widget."""

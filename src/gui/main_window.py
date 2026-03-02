@@ -505,7 +505,7 @@ class MainWindow(TkBase):
         self.is_shutting_down = False
         self.cancellation_event = threading.Event()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.title(f"DowP Lite{self.APP_VERSION}")
+        self.title(f"DowP Lite {self.APP_VERSION}")
         
         # Obtener dimensiones de pantalla
         screen_width = self.winfo_screenwidth()

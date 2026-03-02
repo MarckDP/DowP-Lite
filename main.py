@@ -10,14 +10,37 @@ import platform
 from tkinter import messagebox
 from PIL import Image, ImageTk
 
-APP_VERSION = "1.3.5"
+APP_VERSION = "1.3.8"
+
+def get_app_data_dir(app_name="DowP"):
+    """
+    Retorna un directorio con permisos de escritura para la aplicación,
+    ideal para almacenar binarios descargados (ffmpeg, deno) y configuraciones.
+    """
+    home = os.path.expanduser("~")
+    if platform.system() == "Windows":
+        return os.path.join(os.environ.get("APPDATA", os.path.join(home, "AppData", "Roaming")), app_name)
+    elif platform.system() == "Darwin":
+        return os.path.join(home, "Library", "Application Support", app_name)
+    else:  # Linux
+        return os.path.join(os.environ.get("XDG_DATA_HOME", os.path.join(home, ".local", "share")), app_name)
 
 if getattr(sys, 'frozen', False):
     PROJECT_ROOT = os.path.dirname(sys.executable)
+    # Escribir en AppData SOLO en macOS donde hay protección de sistema de archivos en el .app
+    if platform.system() == "Darwin":
+        APP_DATA_DIR = get_app_data_dir()
+        BIN_DIR = os.path.join(APP_DATA_DIR, "bin")
+    else:
+        APP_DATA_DIR = PROJECT_ROOT
+        BIN_DIR = os.path.join(PROJECT_ROOT, "bin")
 else:
     PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+    APP_DATA_DIR = PROJECT_ROOT
+    BIN_DIR = os.path.join(PROJECT_ROOT, "bin")
 
-BIN_DIR = os.path.join(PROJECT_ROOT, "bin")
+os.makedirs(BIN_DIR, exist_ok=True)
+
 FFMPEG_BIN_DIR = os.path.join(BIN_DIR, "ffmpeg")
 DENO_BIN_DIR = os.path.join(BIN_DIR, "deno")
 
@@ -34,13 +57,24 @@ def get_icon_path():
     else:  # Windows y Linux
         icon_file = "DowP-icon.ico"
     
-    icon_path = os.path.join(PROJECT_ROOT, icon_file)
+    # Intentar obtener ruta para PyInstaller (empaquetado)
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = PROJECT_ROOT
+        
+    icon_path = os.path.join(base_path, icon_file)
     
     # Verificar si existe, sino retornar None
     if os.path.exists(icon_path):
         return icon_path
     else:
-        print(f"ADVERTENCIA: No se encontró el icono en: {icon_path}")
+        # Fallback al PROJECT_ROOT original por si acaso
+        fallback_path = os.path.join(PROJECT_ROOT, icon_file)
+        if os.path.exists(fallback_path):
+            return fallback_path
+            
+        print(f"ADVERTENCIA: No se encontró el icono en: {icon_path} ni en {fallback_path}")
         return None
 
 

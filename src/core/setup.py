@@ -10,9 +10,7 @@ import stat
 import platform
 
 from packaging import version
-from main import PROJECT_ROOT, BIN_DIR, FFMPEG_BIN_DIR
-
-DENO_BIN_DIR = os.path.join(PROJECT_ROOT, "bin", "deno")
+from main import PROJECT_ROOT, APP_DATA_DIR, BIN_DIR, FFMPEG_BIN_DIR, DENO_BIN_DIR
 
 DENO_VERSION_FILE = os.path.join(DENO_BIN_DIR, "deno_version.txt")
 FFMPEG_VERSION_FILE = os.path.join(FFMPEG_BIN_DIR, "ffmpeg_version.txt")
@@ -62,10 +60,11 @@ def check_and_install_python_dependencies(progress_callback):
         return False
 
 def get_latest_ffmpeg_info(progress_callback):
+    """Consulta la API según el SO: GyanD (estable) para Windows/Linux, evermeet.cx para Mac."""
     system, arch = get_system_context()
     try:
         if system == "Darwin":
-            # Para Mac necesitamos dos descargas separadas
+            # Para Mac necesitamos dos descargas separadas (ffmpeg y ffprobe)
             tools = ["ffmpeg", "ffprobe"]
             results = {}
             for tool in tools:
@@ -78,24 +77,22 @@ def get_latest_ffmpeg_info(progress_callback):
                 }
             # Devolvemos el tag del primero y el diccionario de URLs
             return results["ffmpeg"]["tag"], results
-        
-        else:  # Windows / Linux (BtbN GitHub)
-            api_url = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases"
+
+        else:  # Windows / Linux — GyanD (releases estables, reemplaza a BtbN nightly)
+            progress_callback("Consultando la última versión de FFmpeg (Estable)...", 5)
+            api_url = "https://api.github.com/repos/GyanD/codexffmpeg/releases/latest"
             response = requests.get(api_url, timeout=15)
             response.raise_for_status()
-            releases = response.json()
-            latest_release_data = next((r for r in releases if r['tag_name'] != 'latest'), None)
-            
-            if not latest_release_data: return None, None
-            
-            tag_name = latest_release_data["tag_name"]
-            file_identifier = "win64-gpl.zip" if system == "Windows" else "linux64-gpl.tar.xz"
-            
-            for asset in latest_release_data["assets"]:
+            latest_release = response.json()
+
+            tag_name = latest_release["tag_name"]
+            file_identifier = "full_build.zip"
+
+            for asset in latest_release.get("assets", []):
                 if file_identifier in asset["name"] and "shared" not in asset["name"]:
-                    progress_callback("Información de FFmpeg (GitHub) encontrada.", 10)
+                    progress_callback("Información de FFmpeg estable encontrada.", 10)
                     return tag_name, asset["browser_download_url"]
-                    
+
         return None, None
     except Exception as e:
         progress_callback(f"Error al buscar FFmpeg: {e}", -1)
@@ -103,73 +100,106 @@ def get_latest_ffmpeg_info(progress_callback):
     
 def download_and_install_ffmpeg(tag, url_data, progress_callback):
     """
-    Descarga e instala FFmpeg. En Windows extrae todo del mismo ZIP.
-    En macOS descarga cada herramienta por separado.
+    Descarga e instala FFmpeg.
+    - Windows/Linux: url_data es un string (GyanD). Se busca ffmpeg.exe dinámicamente.
+    - macOS: url_data es un dict con una URL por herramienta (evermeet.cx).
     """
     system = platform.system()
-    # Si es Windows, el 'url_data' es un string. Creamos un dict para el bucle.
+    # En Mac url_data es un dict; en Windows/Linux es un string.
     downloads = url_data if isinstance(url_data, dict) else {"ffmpeg_package": {"url": url_data}}
-    
+
     try:
         os.makedirs(FFMPEG_BIN_DIR, exist_ok=True)
-        
+
         for tool_key, info in downloads.items():
             url = info["url"] if isinstance(info, dict) else url_data
             file_name = url.split('/')[-1]
-            archive_name = os.path.join(PROJECT_ROOT, file_name)
-            
-            # 1. Descarga (Se mantiene igual)
+            archive_name = os.path.join(APP_DATA_DIR, file_name)
+            last_reported_progress = -1
+
+            # 1. Descarga con progreso
             with requests.get(url, stream=True, timeout=120) as r:
                 r.raise_for_status()
+                total_size = int(r.headers.get('content-length', 0))
+                downloaded_size = 0
                 with open(archive_name, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=8192):
-                        if chunk: f.write(chunk)
+                        if not chunk:
+                            continue
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        if total_size > 0:
+                            progress = 40 + (downloaded_size / total_size) * 40
+                            if int(progress) > last_reported_progress:
+                                progress_callback(f"Descargando FFmpeg: {downloaded_size/1024/1024:.1f}/{total_size/1024/1024:.1f} MB", progress)
+                                last_reported_progress = int(progress)
 
             # 2. Extracción temporal
-            temp_path = os.path.join(PROJECT_ROOT, f"temp_{tool_key}")
-            if os.path.exists(temp_path): shutil.rmtree(temp_path)
-            
-            if archive_name.endswith(".zip"):
-                with zipfile.ZipFile(archive_name, 'r') as zip_ref: zip_ref.extractall(temp_path)
-            else:
-                with tarfile.open(archive_name, 'r:xz') as tar_ref: tar_ref.extractall(temp_path)
+            progress_callback("Extrayendo archivos de FFmpeg...", 85)
+            temp_path = os.path.join(APP_DATA_DIR, f"temp_{tool_key}")
+            if os.path.exists(temp_path):
+                shutil.rmtree(temp_path)
 
-            # 3. Mover binarios (Lógica inteligente para Windows vs Mac)
-            # En Windows queremos ffmpeg y ffprobe. En Mac, tool_key es el nombre específico.
-            target_tools = ["ffmpeg", "ffprobe"] if system == "Windows" else [tool_key]
-            
-            for root, dirs, files in os.walk(temp_path):
-                for f in files:
-                    clean_name = f.replace(".exe", "").lower()
-                    if clean_name in target_tools:
-                        src = os.path.join(root, f)
-                        dst = os.path.join(FFMPEG_BIN_DIR, f)
-                        
-                        if os.path.exists(dst): os.remove(dst)
-                        shutil.move(src, dst)
-                        
-                        # Permisos para Mac/Linux
-                        if system != "Windows":
+            if archive_name.endswith(".zip"):
+                with zipfile.ZipFile(archive_name, 'r') as zip_ref:
+                    zip_ref.extractall(temp_path)
+            else:
+                with tarfile.open(archive_name, 'r:xz') as tar_ref:
+                    tar_ref.extractall(temp_path)
+
+            # 3. Mover binarios
+            if system == "Darwin":
+                # Mac: cada descarga es una herramienta individual (ffmpeg / ffprobe)
+                target_tools = [tool_key]
+                for root, dirs, files in os.walk(temp_path):
+                    for f in files:
+                        if f.replace(".exe", "").lower() in target_tools:
+                            src = os.path.join(root, f)
+                            dst = os.path.join(FFMPEG_BIN_DIR, f)
+                            if os.path.exists(dst):
+                                os.remove(dst)
+                            shutil.move(src, dst)
+                            # Permisos de ejecución en Mac/Linux
                             st = os.stat(dst)
                             os.chmod(dst, st.st_mode | stat.S_IEXEC)
+            else:
+                # Windows/Linux: GyanD extrae en subcarpeta; buscamos ffmpeg.exe dinámicamente
+                bin_content_path = None
+                for root, dirs, files in os.walk(temp_path):
+                    if "ffmpeg.exe" in files:
+                        bin_content_path = root
+                        break
 
-            # Limpieza
+                if not bin_content_path:
+                    raise Exception("No se encontró ffmpeg.exe dentro del archivo descargado.")
+
+                for item in os.listdir(bin_content_path):
+                    dest_path = os.path.join(FFMPEG_BIN_DIR, item)
+                    if os.path.exists(dest_path):
+                        os.remove(dest_path)
+                    shutil.move(os.path.join(bin_content_path, item), dest_path)
+
+            # Limpieza del archivo temporal
             shutil.rmtree(temp_path)
             os.remove(archive_name)
 
-        # 4. LA DIETA: Eliminar ffplay si existe
+        # 4. LA DIETA: Eliminar ffplay (no se usa)
         ffplay_exe = "ffplay.exe" if system == "Windows" else "ffplay"
         ffplay_path = os.path.join(FFMPEG_BIN_DIR, ffplay_exe)
         if os.path.exists(ffplay_path):
-            try: os.remove(ffplay_path)
-            except: pass
+            try:
+                os.remove(ffplay_path)
+                print("INFO: ffplay eliminado para ahorrar espacio.")
+            except Exception as e:
+                print(f"ADVERTENCIA: No se pudo borrar ffplay: {e}")
 
-        with open(FFMPEG_VERSION_FILE, "w") as f: f.write(tag)
+        with open(FFMPEG_VERSION_FILE, "w") as f:
+            f.write(tag)
         progress_callback(f"FFmpeg {tag} instalado.", 95)
         return True
 
     except Exception as e:
-        progress_callback(f"Error: {e}", -1)
+        progress_callback(f"Error al instalar FFmpeg: {e}", -1)
         return False
 
 def get_latest_deno_info(progress_callback):
@@ -216,7 +246,7 @@ def download_and_install_deno(tag, url, progress_callback):
     system, arch = get_system_context()
     try:
         file_name = url.split('/')[-1]
-        archive_name = os.path.join(PROJECT_ROOT, file_name)
+        archive_name = os.path.join(APP_DATA_DIR, file_name)
         
         # --- Lógica de descarga ---
         with requests.get(url, stream=True, timeout=120) as r:
@@ -384,7 +414,7 @@ def check_app_update(current_version_str):
     """Consulta GitHub para ver si hay una nueva versión y busca el instalador LIGHT en ZIP."""
     print(f"INFO: Verificando actualizaciones para la versión actual: {current_version_str}")
     try:
-        api_url = "https://api.github.com/repos/MarckDP/DowP/releases"
+        api_url = "https://api.github.com/repos/MarckDP/DowP-Lite/releases"
 
         response = requests.get(api_url, timeout=10)
         response.raise_for_status()

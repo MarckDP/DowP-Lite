@@ -131,7 +131,7 @@ class BatchDownloadTab(ctk.CTkFrame):
         
         ctk.CTkLabel(self.input_frame, text="URL:").grid(row=0, column=0, padx=(10, 5), pady=0)
         self.url_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Pega una URL de video o playlist...")
-        self.url_entry.bind("<Button-3>", lambda e: self.create_entry_context_menu(self.url_entry)) # <-- AÑADIR ESTA LÍNEA
+        self._bind_entry_context_menu(self.url_entry)
         self.url_entry.bind("<Return>", lambda event: self._on_analyze_click())
         self.url_entry.grid(row=0, column=1, padx=5, pady=0, sticky="ew")
 
@@ -397,7 +397,7 @@ class BatchDownloadTab(ctk.CTkFrame):
 
         ctk.CTkLabel(self.info_frame, text="Título:", anchor="w").pack(fill="x", padx=5, pady=(0,0))
         self.title_entry = ctk.CTkEntry(self.info_frame, font=("", 14), placeholder_text="Título del archivo...")
-        self.title_entry.bind("<Button-3>", lambda e: self.create_entry_context_menu(self.title_entry))
+        self._bind_entry_context_menu(self.title_entry)
         
         # NUEVO: Guardar cambios en tiempo real al escribir
         self.title_entry.bind("<KeyRelease>", self._on_batch_config_change)
@@ -525,7 +525,7 @@ class BatchDownloadTab(ctk.CTkFrame):
         
         ctk.CTkLabel(line1_frame, text="Carpeta de Salida:").grid(row=0, column=0, padx=(10, 5), pady=5, sticky="w")
         self.output_path_entry = ctk.CTkEntry(line1_frame, placeholder_text="Selecciona una carpeta...")
-        self.output_path_entry.bind("<Button-3>", lambda e: self.create_entry_context_menu(self.output_path_entry))
+        self._bind_entry_context_menu(self.output_path_entry)
         self.output_path_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
         
         self.select_folder_button = ctk.CTkButton(line1_frame, text="...", width=40, command=self.select_output_folder)
@@ -551,7 +551,7 @@ class BatchDownloadTab(ctk.CTkFrame):
         Tooltip(self.speed_limit_entry, tooltip_text, delay_ms=1000)
         # --- FIN TOOLTIP ---
         
-        self.speed_limit_entry.bind("<Button-3>", lambda e: self.create_entry_context_menu(self.speed_limit_entry))
+        self._bind_entry_context_menu(self.speed_limit_entry)
         self.speed_limit_entry.grid(row=0, column=5, padx=(0, 10), pady=5)
         
         line2_frame = ctk.CTkFrame(self.download_frame, fg_color="transparent")
@@ -591,7 +591,7 @@ class BatchDownloadTab(ctk.CTkFrame):
         # --- FIN DEL TOOLTIP ---
 
         self.subfolder_name_entry = ctk.CTkEntry(line2_frame, width=100, placeholder_text="DowP List")
-        self.subfolder_name_entry.bind("<Button-3>", lambda e: self.create_entry_context_menu(self.subfolder_name_entry))
+        self._bind_entry_context_menu(self.subfolder_name_entry)
         self.subfolder_name_entry.grid(row=0, column=3, padx=(0, 10), pady=5, sticky="w")
         self.subfolder_name_entry.configure(state="disabled")
         
@@ -2904,7 +2904,16 @@ class BatchDownloadTab(ctk.CTkFrame):
         except Exception as e:
             print(f"Error al intentar abrir la carpeta: {e}")
 
-    def create_entry_context_menu(self, widget):
+    def _bind_entry_context_menu(self, widget):
+        """Asocia el menú contextual de edición para Windows/Linux/macOS."""
+        widget.bind("<Button-3>", lambda event: self.create_entry_context_menu(widget, event))
+
+        if sys.platform == "darwin":
+            # Fallbacks comunes en macOS (trackpad y Ctrl+Click).
+            widget.bind("<Button-2>", lambda event: self.create_entry_context_menu(widget, event))
+            widget.bind("<Control-Button-1>", lambda event: self.create_entry_context_menu(widget, event))
+
+    def create_entry_context_menu(self, widget, event=None):
         """Crea un menú contextual simple para los Entry widgets."""
         menu = Menu(self, tearoff=0)
         
@@ -2951,8 +2960,10 @@ class BatchDownloadTab(ctk.CTkFrame):
         menu.add_command(label="Pegar", command=paste_text)
         menu.add_separator()
         menu.add_command(label="Seleccionar todo", command=lambda: widget.select_range(0, 'end'))
-        
-        menu.tk_popup(widget.winfo_pointerx(), widget.winfo_pointery())
+
+        x = event.x_root if event else widget.winfo_pointerx()
+        y = event.y_root if event else widget.winfo_pointery()
+        menu.tk_popup(x, y)
 
     def _on_clear_list_click(self):
         """
